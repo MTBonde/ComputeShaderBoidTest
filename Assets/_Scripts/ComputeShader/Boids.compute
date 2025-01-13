@@ -1,0 +1,98 @@
+#pragma kernel CSMain
+
+struct BoidData
+{
+    float3 position;
+    float3 direction;
+    float speed;
+};
+
+RWStructuredBuffer<BoidData> boidData; // Buffer for boid data
+float neighborRadius; // Radius for neighbor detection
+float separationWeight; // Weight for separation force
+float alignmentWeight; // Weight for alignment force
+float cohesionWeight; // Weight for cohesion force
+float maxSpeed; // Maximum speed of boids
+float deltaTime; // Time step for updates
+
+uint bufferLength; // Length of the boidData buffer
+
+float3 sphereCenter;
+float sphereRadius;
+
+
+[numthreads(256, 1, 1)]
+void CSMain(uint3 id : SV_DispatchThreadID)
+{
+    uint index = id.x;
+
+    if (index >= bufferLength) return; // Avoid out-of-bounds access
+
+    BoidData currentBoid = boidData[index];
+
+    float3 separation = float3(0, 0, 0);
+    float3 alignment = float3(0, 0, 0);
+    float3 cohesion = float3(0, 0, 0);
+    int neighborCount = 0;
+
+    // Loop through all boids to calculate rules
+    for (uint i = 0; i < bufferLength; i++)
+    {
+        if (i == index) continue; // Skip self
+
+        BoidData otherBoid = boidData[i];
+        float3 offset = otherBoid.position - currentBoid.position;
+        float distanceSq = dot(offset, offset);
+
+        if (distanceSq < neighborRadius * neighborRadius)
+        {
+            float distance = sqrt(distanceSq);
+            alignment += otherBoid.direction; // Match direction
+            cohesion += otherBoid.position; // Move to center
+            separation -= offset / distance; // Move away
+            neighborCount++;
+        }
+    }
+
+    if (neighborCount > 0)
+    {
+        // Calculate separation, alignment, and cohesion
+        separation = normalize(separation / neighborCount) * separationWeight;
+        alignment = normalize(alignment / neighborCount) * alignmentWeight;
+        cohesion = normalize((cohesion / neighborCount) - currentBoid.position) * cohesionWeight;
+    }
+
+    // Combine forces
+    float3 acceleration = separation + alignment + cohesion;
+
+    // Update direction and speed
+    currentBoid.direction += acceleration * deltaTime;
+    currentBoid.direction = normalize(currentBoid.direction); // Keep direction normalized
+
+    currentBoid.speed = clamp(currentBoid.speed + length(acceleration) * deltaTime, 0, maxSpeed);
+
+    // Update position
+    currentBoid.position += currentBoid.direction * currentBoid.speed * deltaTime;
+
+    // Sphere boundary logic
+    // Calculate offset from sphere center
+    float3 offsetFromCenter = currentBoid.position - sphereCenter;
+    float distanceFromCenter = length(offsetFromCenter);
+
+    // Check if boid is within steering range (95% of sphere radius)
+    if (distanceFromCenter > sphereRadius * 0.95f)
+    {
+        // Calculate steering force
+        float overflow = distanceFromCenter - sphereRadius * 0.95f;
+        float normalizedOverflow = overflow / (sphereRadius * 0.05f); // Normalize within the last 5% of the radius
+        float steeringStrength = pow(normalizedOverflow, 2); // Exponential force
+
+        float3 steeringForce = -normalize(offsetFromCenter) * steeringStrength * maxSpeed;
+
+        // Apply steering force to the boid's direction
+        currentBoid.direction += steeringForce * deltaTime;
+        currentBoid.direction = normalize(currentBoid.direction); // Normalize direction again
+    }
+
+    boidData[index] = currentBoid;
+}

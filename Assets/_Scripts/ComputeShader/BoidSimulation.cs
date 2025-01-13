@@ -29,6 +29,7 @@ public class BoidSimulation : MonoBehaviour
     private void Start()
     {
         InitializeBoids();
+        InitializeRendering();
     }
 
     private void Update()
@@ -50,6 +51,16 @@ public class BoidSimulation : MonoBehaviour
         boidBuffer = new ComputeBuffer(boidCount, sizeof(float) * 7); // 3 floats for position, 3 for direction, 1 for speed
         boidBuffer.SetData(boidArray);
     }
+    
+    private ComputeBuffer argsBuffer;
+
+    private void InitializeRendering()
+    {
+        uint[] args = new uint[5] { boidMesh.GetIndexCount(0), (uint)boidCount, 0, 0, 0 };
+        argsBuffer = new ComputeBuffer(1, args.Length * sizeof(uint), ComputeBufferType.IndirectArguments);
+        argsBuffer.SetData(args);
+    }
+
 
     private void RunComputeShader()
     {
@@ -75,18 +86,8 @@ public class BoidSimulation : MonoBehaviour
 
     private void RenderBoids()
     {
-        // Retrieve data from the buffer for rendering
-        boidBuffer.GetData(boidArray);
-
-        for (int i = 0; i < boidCount; i++)
-        {
-            Graphics.DrawMesh(
-                boidMesh,
-                Matrix4x4.TRS(boidArray[i].position, Quaternion.LookRotation(boidArray[i].direction), Vector3.one),
-                boidMaterial,
-                0
-            );
-        }
+        boidMaterial.SetBuffer("boidData", boidBuffer);
+        Graphics.DrawMeshInstancedIndirect(boidMesh, 0, boidMaterial, new Bounds(Vector3.zero, Vector3.one * 1000f), argsBuffer);
     }
 
     private void OnDestroy()
